@@ -64,11 +64,11 @@ class DatasetGenerator:
         dist_params=None,
         noise_level=0,
         categories=None,
-        base_on=None,
         base_probs=None,
-        rates=None,
         expressions=None,
         exp_level=None,
+        categorical_var=None,
+        dist_dict=None,
     ):
         """
         Add a new variable to the dataset.
@@ -101,6 +101,19 @@ class DatasetGenerator:
                 "noise_level": noise_level,
             }
 
+        elif (
+            categorical_var and dist_dict
+        ):  # Numeric variable based on a categorical variable
+            data = self.gen_numeric_from_cat(categorical_var, dist_dict)
+            self.dataset[name] = self.add_noise(data, noise_level)
+
+            metadata = {
+                "type": "numeric_from_cat",
+                "categorical_var": categorical_var,
+                "dist_map": dist_dict,
+                "noise_level": noise_level,
+            }
+
         elif categories:
             if (
                 expressions and exp_level is not None
@@ -126,9 +139,16 @@ class DatasetGenerator:
                 }
 
             else:  # Simple categorical variable
-                data = self.gen_categorical_var(
-                    name, categories, base_probs, noise_level
+                data = self.gen_categorical_var(categories, base_probs, noise_level)
+                self.dataset[name] = self.add_categorical_noise(
+                    data, noise_level, categories
                 )
+                metadata = {
+                    "type": "simpe categorical",
+                    "categories": categories,
+                    "base_probs": base_probs,
+                    "noise_level": noise_level,
+                }
 
         else:
             raise ValueError("Not enough information provided to generate variable.")
@@ -138,7 +158,7 @@ class DatasetGenerator:
 
         return self
 
-    def gen_from_dist(self, distribution, dist_params):
+    def gen_from_dist(self, distribution, dist_params, size=None):
         """
         Generate data based on a given statistical distribution and its parameters.
 
@@ -150,6 +170,10 @@ class DatasetGenerator:
         Returns:
         - np.array: Data generated from the distribution.
         """
+        print(size)
+        size = self.n_observations if size is None else size
+        print(size)
+
         distributions = {
             "uniform": (np.random.uniform, {"low": 0, "high": 1}),
             "normal": (np.random.normal, {"loc": 0, "scale": 1}),
@@ -160,9 +184,9 @@ class DatasetGenerator:
             raise ValueError(f"Unsupported distribution: {distribution}.")
 
         dist_func, params = distributions[distribution]
-        params = {**params, **(dist_params or {})}
-
-        data = dist_func(size=self.n_observations, **params)
+        params.update(dist_params or {})
+        pprint(params)
+        data = dist_func(size=size, **params)
 
         return data
 
@@ -267,55 +291,40 @@ class DatasetGenerator:
 
         return data
 
-    def gen_conditional_categorical_var_(
-        self, condition_vars, new_var_name, prob_distributions, separator="_"
-    ):
+    def gen_numeric_from_cat(self, categorical_var, dist_map):
         """
-        Add a new categorical variable where probabilities are conditioned on multiple existing categorical variables.
-
+        Generate a new numerical column based on categories in another column.
+        for each cat a new distribution is created with specified parameters
         Args:
-        - condition_vars (list): List of names of the existing categorical variables that conditions the distributions.
-        - new_var_name (str): Name of the new categorical variable.
-        - prob_distributions (dict): A dictionary that specifies the conditional distributions based on combined levels.
-        - separator (str, optional): Separator used in combining levels. Default is "_".
+        - name (str): Name of the new numerical column.
+        - categorical_var (str): Name of the existing categorical column.
+        - dist_map (dict): A dictionary mapping categories to distributions and their params.
 
         Returns:
-        - self: Returns the modified object.
+        - None: Adds the new column to the DataFrame in-place.
         """
 
-        # Create combined condition variable
-        combined_condition = separator.join(condition_vars)
-        self.dataset[combined_condition] = self.dataset[condition_vars].apply(
-            lambda x: separator.join(x), axis=1
-        )
+        unique_categories = self.dataset[categorical_var].unique()
+        # init data with 0
+        data = np.zeros(self.n_observations)
 
-        if combined_condition not in self.dataset.columns:
-            raise ValueError(
-                f"Combined variable '{combined_condition}' could not be created."
-            )
+        for cat in unique_categories:
+            # get subset of dataframe that is of cat
+            mask = self.dataset[categorical_var] == cat
+            subset_size = mask.sum()
 
-        def sample_conditioned_on_value(val):
-            dist = dict(prob_distributions[val])
-            categories, probabilities = zip(*dist.items())
-            return np.random.choice(categories, p=probabilities)
+            # get dist info from dict
+            dist_info = dist_map.get(cat, None)
+            if dist_info is None:
+                raise ValueError(f"No distribution found for category {cat}")
 
-        self.dataset[new_var_name] = self.dataset[combined_condition].apply(
-            sample_conditioned_on_value
-        )
-
-        # Metadata for the constructed variable
-        metadata = {
-            "type": "conditional_categorical_multi",
-            "condition_vars": condition_vars,
-            "prob_distributions": prob_distributions,
-        }
-
-        self.metadata[new_var_name] = metadata
-
-        # Drop the temporary combined variable
-        self.dataset.drop(combined_condition, axis=1, inplace=True)
-
-        return self
+            distribution = dist_info["dist"]
+            params = dist_info["params"]
+            print(subset_size)
+            # create numeric variable based on distribution
+            generated_data = self.gen_from_dist(distribution, params, size=subset_size)
+            data[mask] = generated_data
+        return data
 
     def remove_var(self, name):
         self.dataset = self.dataset.drop(name, axis=1)
@@ -396,3 +405,64 @@ print(data_gen.get_dataset().head(100))
 pprint(data_gen.get_metadata())
 
 # %%
+# Assuming DatasetGenerator class is defined above this code
+
+# Create the dataset generator with 1000 observations
+ds_generator = DatasetGenerator(1000, "medical_dataset")
+
+# Gender: Categorical with two categories ('male', 'female')
+ds_generator.add_var(
+    name="gender", categories=["male", "female"], base_probs=[0.5, 0.5]
+)
+
+# Age: Normally distributed, mean age 40, standard deviation 10
+ds_generator.add_var(
+    name="age", distribution="normal", dist_params={"loc": 40, "scale": 10}
+)
+
+# Height: Normally distributed but different for each gender.
+# For males, mean height is 175 cm, standard deviation is 8.
+# For females, mean height is 165 cm, standard deviation is 7.
+ds_generator.add_var(
+    name="height",
+    categorical_var="gender",
+    dist_dict={
+        "male": {"dist": "normal", "params": {"loc": 175, "scale": 8}},
+        "female": {"dist": "normal", "params": {"loc": 165, "scale": 7}},
+    },
+)
+
+# Weight: Normally distributed but dependent on height.
+# Weight = 0.9 * height - 100 + noise
+ds_generator.add_var(name="weight", expression="0.9 * height - 100", noise_level=0.05)
+
+# BMI: Calculated as weight / (height/100)^2
+ds_generator.add_var(name="bmi", expression="weight / (height / 100) ** 2")
+
+# Insurance: Categorical, either 'yes' or 'no' with different probabilities
+ds_generator.add_var(name="insurance", categories=["yes", "no"], base_probs=[0.7, 0.3])
+
+# Diabetes: Categorical ('yes', 'no') but conditionally dependent on BMI and age.
+# The higher the BMI and age, the higher the chance of having diabetes.
+ds_generator.add_var(
+    name="diabetes",
+    categories=["yes", "no"],
+    base_probs=[0.1, 0.9],
+    expressions=["bmi * 0.05 + age * 0.05", "1"],
+    exp_level=0.5,
+)
+
+# Risk of diabetes: A numeric variable that is a function of age, bmi, and whether the person has insurance.
+# Calculated as (0.3 * age + 0.5 * bmi - 5 * (insurance == 'yes'))
+ds_generator.add_var(
+    name="risk_of_diabetes",
+    expression="0.3 * age + 0.5 * bmi - 5 * (insurance == 'yes')",
+    noise_level=0.1,
+)
+
+# Save the dataset
+ds_generator.save_as_csv("medical_dataset.csv")
+
+# Output metadata
+print("Dataset metadata:")
+pprint(ds_generator.get_metadata())

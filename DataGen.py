@@ -141,7 +141,7 @@ class DataGenerator:
             if (
                 exp_dict and exp_level is not None
             ):  # Conditional categorical variable from expressions
-                data = self.gen_conditional_categorical_var_from_exp(
+                data = self.gen_categorical_var_from_exp(
                     categories, base_probs, exp_dict, exp_level
                 )
                 self.dataset[name] = self.add_categorical_noise(
@@ -265,7 +265,7 @@ class DataGenerator:
 
         return data
 
-    def gen_conditional_categorical_var_from_exp(
+    def gen_categorical_var_from_exp(
         self,
         category_exp_map: Dict[str, str],
         base_probs: List[float],
@@ -387,35 +387,23 @@ class DataGenerator:
         return self
 
     def create_target(self, name, **kwargs):
+        """
+        Simple method to create a target variable.
+        This methods simply calles the add_var method but prefixes the var name with _target.
+        Args:
+        name: name of target variable str
+        **kwargs: kwargs for add var
+        """
         self.add_var("target_" + name, **kwargs)
 
     def add_bias(self, **kwargs):
+        """
+        Simple method do introduce a bias into the target var.
+        Simple creates a new var that is prefixed with bias.
+        TODO: should ensure that the orignial target is part of the input variables.(complicated check)
+        """
         target_name = self.get_target_var_name()
-        # target_metadata = self.metadata[target_name]
         biased_target_name = "biased_" + target_name
-        # get lvl of measurment for bias var and target
-        # target_lvl_measurment = target_metadata["lvl_measurment"]
-        # bias_lvl_measurment = self.metadata[bias_base]
-        # # dict to call appropiate add var function bases on lvl of measurmenten
-        # bias_func_map = {
-        #     # lvl of measurment target
-        #     "numeric": {
-        #         # lvl of measurment bias_base
-        #         # for numeric target and numeric bias we use an expression:
-        #         # TODO: could be worth to check if the the bias and target var are in expressions
-        #         "numeric": self.add_var(
-        #             biased_target_name, expression=kwargs["expression"]
-        #         ),
-        #         # for numeric target and cat bias we use one exp for each bias categorie
-        #         # TODO: could be worth to check if the the bias and target var are in expressions
-        #         "categorical": self.add_var(
-        #             biased_target_name,
-        #             categorical_var=bias_base,
-        #             exp_dict=kwargs["exp_dict"],
-        #         ),
-        #     },
-        #     "categorical": {"numeric": self.add_var, "categorical": {}},
-        # }
         self.add_var(biased_target_name, kwargs)
 
     def get_dataset(self):
@@ -437,7 +425,7 @@ class DataGenerator:
     def save_alt_as_csv(self, file_name=None):
         if file_name is None:
             file_name = self.name + "_alt" + ".csv"
-        path = os.path.join("data", "synthetic", file_name)
+        path = os.path.join("data", file_name)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         alt_dataset = self.get_alt_dataset()
         alt_dataset.to_csv(path, index=False)

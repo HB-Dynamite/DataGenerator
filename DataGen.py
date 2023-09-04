@@ -1,13 +1,13 @@
-# %%
 import numpy as np
 from pprint import pprint
 import pandas as pd
 import os
 import math
 import re  # To parse the expression string
+from typing import List, Dict, Union
 
 
-class DatasetGenerator:
+class DataGenerator:
     def __init__(self, n_observations, name):
         self.n_observations = n_observations
         self.name = name
@@ -65,10 +65,11 @@ class DatasetGenerator:
         noise_level=0,
         categories=None,
         base_probs=None,
-        expressions=None,
         exp_level=None,
         categorical_var=None,
         dist_dict=None,
+        exp_dict=None,
+        lvl_measurment=None,
     ):
         """
         Add a new variable to the dataset.
@@ -88,6 +89,9 @@ class DatasetGenerator:
                 "expression": expression,
                 "noise_level": noise_level,
                 "input_vars": self.extract_var_from_re(expression),
+                "lvl_measurement": "numeric"
+                if lvl_measurment is None
+                else lvl_measurment,
             }
 
         elif distribution:
@@ -99,27 +103,46 @@ class DatasetGenerator:
                 "distribution": distribution,
                 "dist_params": dist_params,
                 "noise_level": noise_level,
+                "lvl_measurement": "numeric"
+                if lvl_measurment is None
+                else lvl_measurment,
             }
 
         elif (
             categorical_var and dist_dict
         ):  # Numeric variable based on a categorical variable
-            data = self.gen_numeric_from_cat(categorical_var, dist_dict)
+            data = self.gen_numeric_from_cat_dist(categorical_var, dist_dict)
             self.dataset[name] = self.add_noise(data, noise_level)
 
             metadata = {
-                "type": "numeric_from_cat",
+                "type": "numeric_from_cat_dist",
                 "categorical_var": categorical_var,
                 "dist_map": dist_dict,
                 "noise_level": noise_level,
+                "lvl_measurement": "numeric"
+                if lvl_measurment is None
+                else lvl_measurment,
+            }
+        elif categorical_var and exp_dict:
+            data = self.gen_numeric_from_cat_exp(categorical_var, exp_dict)
+            self.dataset[name] = self.add_noise(data, noise_level)
+
+            metadata = {
+                "type": "numeric_from_cat_exp",
+                "categorical_var": categorical_var,
+                "exp_map": exp_dict,
+                "noise_level": noise_level,
+                "lvl_measurement": "numeric"
+                if lvl_measurment is None
+                else lvl_measurment,
             }
 
         elif categories:
             if (
-                expressions and exp_level is not None
+                exp_dict and exp_level is not None
             ):  # Conditional categorical variable from expressions
                 data = self.gen_conditional_categorical_var_from_exp(
-                    categories, base_probs, expressions, exp_level
+                    categories, base_probs, exp_dict, exp_level
                 )
                 self.dataset[name] = self.add_categorical_noise(
                     data, noise_level, categories
@@ -129,13 +152,16 @@ class DatasetGenerator:
                     "type": "conditional_categorical_from_exp",
                     "categories": categories,
                     "base_probs": base_probs,
-                    "expressions": expressions,
+                    "exp_dict": exp_dict,
                     "exp_level": exp_level,
                     "input_vars": [
                         self.extract_var_from_re(expression)
-                        for expression in expressions
+                        for expression in list(exp_dict.values())
                     ],
                     "noise_level": noise_level,
+                    "lvl_measurement": "categorical"
+                    if lvl_measurment is None
+                    else lvl_measurment,
                 }
 
             else:  # Simple categorical variable
@@ -148,6 +174,9 @@ class DatasetGenerator:
                     "categories": categories,
                     "base_probs": base_probs,
                     "noise_level": noise_level,
+                    "lvl_measurement": "categorical"
+                    if lvl_measurment is None
+                    else lvl_measurment,
                 }
 
         else:
@@ -170,9 +199,7 @@ class DatasetGenerator:
         Returns:
         - np.array: Data generated from the distribution.
         """
-        print(size)
         size = self.n_observations if size is None else size
-        print(size)
 
         distributions = {
             "uniform": (np.random.uniform, {"low": 0, "high": 1}),
@@ -239,21 +266,21 @@ class DatasetGenerator:
         return data
 
     def gen_conditional_categorical_var_from_exp(
-        self, categories, base_probs, expressions, exp_level
-    ):
+        self,
+        category_exp_map: Dict[str, str],
+        base_probs: List[float],
+        exp_level: float,
+    ) -> np.ndarray:
         """
-        Add a conditional categorical variable to the dataset based on an input feature.
+        Generate a conditional categorical variable based on given features.
 
         Args:
-        - name (str): Name of the new variable.
-        - base_on (list): List of names of the input features used in the expression.
-        - categories (list): List of categories.
-        - base_probs (list): Base probabilities for each category.
-        - expressions (str): Expressions to compute probabilities adaptions for each category. higher values mean higher probability for this category
-            - keep in mind that the probalities are transformed with a soft max function to ensure the sum of probs is 1.
+            category_expr_map (Dict[str, str]): Mapping from categories to expressions.
+            base_probs (List[float]): Base probabilities for each category.
+            exp_level (float): A level for balancing the influence of base_probs and adjusted probabilities.
 
         Returns:
-        - data for new var
+            np.ndarray: The generated categorical data.
         """
 
         def softmax(x):
@@ -279,19 +306,31 @@ class DatasetGenerator:
                 np.array(base_probs) * (1 - exp_level) + np.array(exp_probs) * exp_level
             )
 
-        def chose_categorie(row):
+        def chose_categorie(row: pd.Series) -> str:
+            """
+            Choose a category based on final probabilities.
+
+            Args:
+                row (pd.Series): A single row from the DataFrame.
+
+            Returns:
+                str: The chosen category.
+            """
             exp_probs = calculate_probs_from_exp(row, expressions)
             final_probs = combine_base_and_exp_probs(base_probs, exp_probs, exp_level)
             # chose catgore based on final probs
             chosen_category = np.random.choice(categories, p=final_probs)
             return chosen_category
 
+        categories = list(category_exp_map.keys())
+        expressions = list(category_exp_map.values())
+
         # Generate data
         data = self.dataset.apply(chose_categorie, axis=1).to_numpy()
 
         return data
 
-    def gen_numeric_from_cat(self, categorical_var, dist_map):
+    def gen_numeric_from_cat_dist(self, categorical_var, dist_map):
         """
         Generate a new numerical column based on categories in another column.
         for each cat a new distribution is created with specified parameters
@@ -326,9 +365,58 @@ class DatasetGenerator:
             data[mask] = generated_data
         return data
 
+    def gen_numeric_from_cat_exp(self, categorical_var, expression_map):
+        unique_catgories = self.dataset[categorical_var].unique()
+        data = np.zeros(self.n_observations)
+        for cat in unique_catgories:
+            # get subset of dataframe this is of categorie
+            mask = self.dataset[categorical_var] == cat
+            subset_size = mask.sum()
+            # get expression for cat
+            expression = expression_map[cat]
+            if expression is None:
+                raise ValueError(f"No expression found for the catgorie {cat}!")
+            else:
+                # gerate data from respective expression
+                generated_data = self.gen_from_exp(expression)
+            data[mask] = generated_data
+        return data
+
     def remove_var(self, name):
         self.dataset = self.dataset.drop(name, axis=1)
         return self
+
+    def create_target(self, name, **kwargs):
+        self.add_var("target_" + name, **kwargs)
+
+    def add_bias(self, **kwargs):
+        target_name = self.get_target_var_name()
+        # target_metadata = self.metadata[target_name]
+        biased_target_name = "biased_" + target_name
+        # get lvl of measurment for bias var and target
+        # target_lvl_measurment = target_metadata["lvl_measurment"]
+        # bias_lvl_measurment = self.metadata[bias_base]
+        # # dict to call appropiate add var function bases on lvl of measurmenten
+        # bias_func_map = {
+        #     # lvl of measurment target
+        #     "numeric": {
+        #         # lvl of measurment bias_base
+        #         # for numeric target and numeric bias we use an expression:
+        #         # TODO: could be worth to check if the the bias and target var are in expressions
+        #         "numeric": self.add_var(
+        #             biased_target_name, expression=kwargs["expression"]
+        #         ),
+        #         # for numeric target and cat bias we use one exp for each bias categorie
+        #         # TODO: could be worth to check if the the bias and target var are in expressions
+        #         "categorical": self.add_var(
+        #             biased_target_name,
+        #             categorical_var=bias_base,
+        #             exp_dict=kwargs["exp_dict"],
+        #         ),
+        #     },
+        #     "categorical": {"numeric": self.add_var, "categorical": {}},
+        # }
+        self.add_var(biased_target_name, kwargs)
 
     def get_dataset(self):
         return self.dataset
@@ -342,7 +430,7 @@ class DatasetGenerator:
     def save_as_csv(self, file_name=None):
         if file_name is None:
             file_name = self.name + ".csv"
-        path = os.path.join("data", "synthetic", file_name)
+        path = os.path.join("data", file_name)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         self.dataset.to_csv(path, index=False)
 
@@ -364,105 +452,8 @@ class DatasetGenerator:
 
         return filtered_variables
 
-
-# %%
-# 1. Create a new DatasetGenerator instance with 1000 observations named "my_dataset"
-data_gen = DatasetGenerator(1000, "my_dataset")
-
-# 2. Add variables x1, x2, etc., using chaining
-
-data_gen.add_var(
-    "x1", distribution="normal", dist_params={"loc": 5, "scale": 2}
-).add_var("x2", distribution="uniform", dist_params={"low": 0, "high": 10}).add_var(
-    "x3", expression="x1 + x2", noise_level=0.5
-)
-
-# 3. Check the dataset
-# print(data_gen.get_dataset().head())
-
-# 4. Save the dataset as CSV
-data_gen.save_as_csv()
-
-
-# For further additions, just continue chaining:
-
-data_gen.add_var(
-    "x4", distribution="normal", dist_params={"loc": 3, "scale": 1}
-).add_var("x5", expression="x4*2")
-
-
-data_gen.add_var(
-    "cat1",
-    categories=["n0", "n1"],
-    base_probs=[0.5, 0.5],
-    expressions=["x1", "-x2"],
-    exp_level=0.5,
-    noise_level=0.3,
-)
-# 6. Check the updated dataset
-print(data_gen.get_dataset().head(100))
-
-pprint(data_gen.get_metadata())
-
-# %%
-# Assuming DatasetGenerator class is defined above this code
-
-# Create the dataset generator with 1000 observations
-ds_generator = DatasetGenerator(1000, "medical_dataset")
-
-# Gender: Categorical with two categories ('male', 'female')
-ds_generator.add_var(
-    name="gender", categories=["male", "female"], base_probs=[0.5, 0.5]
-)
-
-# Age: Normally distributed, mean age 40, standard deviation 10
-ds_generator.add_var(
-    name="age", distribution="normal", dist_params={"loc": 40, "scale": 10}
-)
-
-# Height: Normally distributed but different for each gender.
-# For males, mean height is 175 cm, standard deviation is 8.
-# For females, mean height is 165 cm, standard deviation is 7.
-ds_generator.add_var(
-    name="height",
-    categorical_var="gender",
-    dist_dict={
-        "male": {"dist": "normal", "params": {"loc": 175, "scale": 8}},
-        "female": {"dist": "normal", "params": {"loc": 165, "scale": 7}},
-    },
-)
-
-# Weight: Normally distributed but dependent on height.
-# Weight = 0.9 * height - 100 + noise
-ds_generator.add_var(name="weight", expression="0.9 * height - 100", noise_level=0.05)
-
-# BMI: Calculated as weight / (height/100)^2
-ds_generator.add_var(name="bmi", expression="weight / (height / 100) ** 2")
-
-# Insurance: Categorical, either 'yes' or 'no' with different probabilities
-ds_generator.add_var(name="insurance", categories=["yes", "no"], base_probs=[0.7, 0.3])
-
-# Diabetes: Categorical ('yes', 'no') but conditionally dependent on BMI and age.
-# The higher the BMI and age, the higher the chance of having diabetes.
-ds_generator.add_var(
-    name="diabetes",
-    categories=["yes", "no"],
-    base_probs=[0.1, 0.9],
-    expressions=["bmi * 0.05 + age * 0.05", "1"],
-    exp_level=0.5,
-)
-
-# Risk of diabetes: A numeric variable that is a function of age, bmi, and whether the person has insurance.
-# Calculated as (0.3 * age + 0.5 * bmi - 5 * (insurance == 'yes'))
-ds_generator.add_var(
-    name="risk_of_diabetes",
-    expression="0.3 * age + 0.5 * bmi - 5 * (insurance == 'yes')",
-    noise_level=0.1,
-)
-
-# Save the dataset
-ds_generator.save_as_csv("medical_dataset.csv")
-
-# Output metadata
-print("Dataset metadata:")
-pprint(ds_generator.get_metadata())
+    def get_target_var_name(self):
+        for var_name, var_metadata in self.metadata.items():
+            if var_name.startswith("target_"):
+                return var_name
+        raise Exception("No target variable found in metadata.")

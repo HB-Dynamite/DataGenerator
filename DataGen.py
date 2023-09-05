@@ -6,6 +6,9 @@ import math
 import re  # To parse the expression string
 from typing import List, Dict, Union
 
+import networkx as nx
+import matplotlib.pyplot as plt
+
 
 class DataGenerator:
     def __init__(self, n_observations, name):
@@ -110,7 +113,7 @@ class DataGenerator:
 
         elif (
             categorical_var and dist_dict
-        ):  # Numeric variable based on a categorical variable
+        ):  # Numeric variable based on distributions for categories
             data = self.gen_numeric_from_cat_dist(categorical_var, dist_dict)
             self.dataset[name] = self.add_noise(data, noise_level)
 
@@ -122,10 +125,18 @@ class DataGenerator:
                 "lvl_measurement": "numeric"
                 if lvl_measurment is None
                 else lvl_measurment,
+                "input_vars": [categorical_var],
             }
         elif categorical_var and exp_dict:
+            # Numeric from expressions for categroies
             data = self.gen_numeric_from_cat_exp(categorical_var, exp_dict)
             self.dataset[name] = self.add_noise(data, noise_level)
+            input_vars = []
+            for expression in list(exp_dict.values()):
+                exp_input_vars = self.extract_var_from_re(expression)
+                for var in exp_input_vars:
+                    input_vars.append(var)
+            unique_input_vars = set(input_vars)
 
             metadata = {
                 "type": "numeric_from_cat_exp",
@@ -142,11 +153,21 @@ class DataGenerator:
                 exp_dict and exp_level is not None
             ):  # Conditional categorical variable from expressions
                 data = self.gen_categorical_var_from_exp(
-                    categories, base_probs, exp_dict, exp_level
+                    categories=categories,
+                    base_probs=base_probs,
+                    exp_dict=exp_dict,
+                    exp_level=exp_level,
                 )
                 self.dataset[name] = self.add_categorical_noise(
                     data, noise_level, categories
                 )
+
+                input_vars = []
+                for expression in list(exp_dict.values()):
+                    exp_input_vars = self.extract_var_from_re(expression)
+                    for var in exp_input_vars:
+                        input_vars.append(var)
+                unique_input_vars = set(input_vars)
 
                 metadata = {
                     "type": "conditional_categorical_from_exp",
@@ -154,10 +175,7 @@ class DataGenerator:
                     "base_probs": base_probs,
                     "exp_dict": exp_dict,
                     "exp_level": exp_level,
-                    "input_vars": [
-                        self.extract_var_from_re(expression)
-                        for expression in list(exp_dict.values())
-                    ],
+                    "input_vars": unique_input_vars,
                     "noise_level": noise_level,
                     "lvl_measurement": "categorical"
                     if lvl_measurment is None
@@ -267,7 +285,8 @@ class DataGenerator:
 
     def gen_categorical_var_from_exp(
         self,
-        category_exp_map: Dict[str, str],
+        categories: List[str],
+        exp_dict: Dict[str, str],
         base_probs: List[float],
         exp_level: float,
     ) -> np.ndarray:
@@ -275,6 +294,7 @@ class DataGenerator:
         Generate a conditional categorical variable based on given features.
 
         Args:
+            categories: List of possbile catgories for the new var
             category_expr_map (Dict[str, str]): Mapping from categories to expressions.
             base_probs (List[float]): Base probabilities for each category.
             exp_level (float): A level for balancing the influence of base_probs and adjusted probabilities.
@@ -322,8 +342,8 @@ class DataGenerator:
             chosen_category = np.random.choice(categories, p=final_probs)
             return chosen_category
 
-        categories = list(category_exp_map.keys())
-        expressions = list(category_exp_map.values())
+        categories = list(exp_dict.keys())
+        expressions = list(exp_dict.values())
 
         # Generate data
         data = self.dataset.apply(chose_categorie, axis=1).to_numpy()
@@ -404,7 +424,7 @@ class DataGenerator:
         """
         target_name = self.get_target_var_name()
         biased_target_name = "biased_" + target_name
-        self.add_var(biased_target_name, kwargs)
+        self.add_var(biased_target_name, **kwargs)
 
     def get_dataset(self):
         return self.dataset
@@ -445,3 +465,59 @@ class DataGenerator:
             if var_name.startswith("target_"):
                 return var_name
         raise Exception("No target variable found in metadata.")
+
+    def generate_graph(self):
+        G = nx.DiGraph()
+        nodes = list(self.metadata.keys())
+        for node in nodes:
+            G.add_node(node)
+            if "input_vars" in self.metadata[node].keys():
+                for input_var in self.metadata[node]["input_vars"]:
+                    if input_var in nodes:  # ensure the input_var is a valid node
+                        G.add_edge(input_var, node)
+
+        def generate_x_positions(metadata):
+            layers = []
+            remaining_nodes = set(metadata.keys())
+            while remaining_nodes:
+                layer = {
+                    node
+                    for node in remaining_nodes
+                    if all(
+                        dep not in remaining_nodes
+                        for dep in metadata[node].get("input_vars", [])
+                    )
+                }
+                if not layer:
+                    raise ValueError(
+                        "No valid layer found; graph may have cycles or missing nodes"
+                    )
+                layers.append(layer)
+                remaining_nodes -= layer
+
+            x_pos = {}
+            for x, layer in enumerate(layers):
+                for node in layer:
+                    x_pos[node] = x
+            return x_pos
+
+        # Generate y-positions using NetworkX's spring_layout
+        pos = nx.spring_layout(G)
+
+        # Generate custom x-positions
+        x_pos = generate_x_positions(self.metadata)
+
+        # Update x-coordinates while keeping y-coordinates from spring_layout
+        for node in pos:
+            pos[node][0] = x_pos.get(node, 0)
+
+        nx.draw(
+            G,
+            pos,  # Pass the positions here
+            with_labels=True,
+            node_color="lightblue",
+            font_weight="bold",
+            node_size=700,
+            font_size=10,
+        )
+        plt.show()

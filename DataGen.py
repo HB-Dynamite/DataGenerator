@@ -521,3 +521,23 @@ class DataGenerator:
             font_size=10,
         )
         plt.show()
+
+    def explore_data(self):
+        """
+        This function allows a quick peek into the generated data.
+        """
+
+        def plt_hists(vars):
+            for var in vars:
+                data = self.dataset[var]
+                plt.hist(data, bins=30, color="skyblue", edgecolor="black", alpha=0.7)
+
+                plt.title(f"Histogram of {var}")
+                plt.xlabel(var)
+                plt.ylabel("Frequency")
+                plt.grid(axis="y", linestyle="--", linewidth=0.7, alpha=0.7)
+
+                plt.show()
+                plt.close()
+
+        plt_hists(self.dataset.columns)

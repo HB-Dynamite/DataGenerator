@@ -32,7 +32,11 @@ ds_generator.add_var(
 
 # %%
 # Add Weight variable using an expression
-ds_generator.add_var(name="weight", expression="1.1 * height - 100", noise_level=0.1)
+ds_generator.add_var(
+    name="weight",
+    expression="(1 - 0.1*('gender' == 'female')) * height - 100",
+    noise_level=0.1,
+)
 
 # %%
 # Add BMI variable using an expression
@@ -71,3 +75,6 @@ pprint(ds_generator.get_metadata())
 
 # %% create network graph
 ds_generator.generate_graph()
+
+# %%
+ds_generator.explore_data()

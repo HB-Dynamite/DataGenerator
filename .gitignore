@@ -1,2 +1,4 @@
 data/
 __pycache__/
+plot_data/
+plots/

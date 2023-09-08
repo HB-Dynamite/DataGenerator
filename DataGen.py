@@ -12,20 +12,38 @@ import matplotlib.pyplot as plt
 
 class DataGenerator:
     def __init__(self, n_observations, name):
+        """
+        Parameters:
+        - n_observations (int): The number of observations to be generated.
+        - name (str): The name of the DataGenerator object.
+
+        Attributes:
+        - n_observations (int): Stores the number of observations.
+        - name (str): Stores the name of the DataSet.
+        - dataset (pd.DataFrame): An empty DataFrame to store the generated data.
+        - metadata (dict): An empty dictionary to store metadata about the variables.
+        """
         self.n_observations = n_observations
         self.name = name
         self.dataset = pd.DataFrame()
         self.metadata = {}
 
-    def add_noise(self, data, noise_level):
+    def add_numerical_noise(self, data, noise_level):
         """
-        Add normal distributed noise to the data based on its data mean.
+        Adds Gaussian (normal) noise to the given data array based on its mean.
 
-        :param data: Original data array.
-        :param noise_level: Proportional level of noise.
+        Parameters:
+        - data (array-like): The original data array to which noise will be added.
+        - noise_level (float): The proportional level of noise to add. Ranges from 0 to 1 ( higher is possible).
                             - 0: No noise
-                            - 1: Noise magnitude roughly equivalent to the mean
-        :return: Data with noise added.
+                            - 1: Noise magnitude roughly equivalent to the mean of the data
+
+        Returns:
+        - array-like: The data array with added noise.
+
+        Note:
+        - The method uses the mean of the data to scale the noise. Therefore, the noise_level
+        parameter controls the magnitude of the noise relative to the data mean.
         """
         # not sure if this is the best method to fit the scale of noise to data values.
         # Idea here is to add use mean so that data of small magniute get small noise and vise versa.
@@ -35,12 +53,21 @@ class DataGenerator:
 
     def add_categorical_noise(self, data, noise_level, categories):
         """
-        Add noise to categorical data.
+        Adds noise to a given categorical data array.
 
-        :param data: Original categorical data array.
-        :param noise_level: Proportion of the data to be modified (0-1).
-        :param categories: List of categories to choose from.
-        :return: Data with noise added.
+        Parameters:
+        - data (array-like): The original categorical data array.
+        - noise_level (float): The proportion of the data to be modified. Ranges from 0 to 1.
+                            - 0: No noise
+                            - 1: All data points may be modified
+        - categories (list): A list of categories to choose from when adding noise.
+
+        Returns:
+        - array-like: The data array with added noise.
+
+        Note:
+        - The method randomly selects a subset of the data based on the noise_level and
+        replaces their categories with random choices from the provided categories list.
         """
         # Check if there's a need for noise
         if noise_level <= 0:
@@ -75,17 +102,33 @@ class DataGenerator:
         lvl_measurment=None,
     ):
         """
-        Add a new variable to the dataset.
-        Depending on the provided arguments, the variable can be:
-        - Generated from a mathematical expression
-        - Generated from a specified distribution
-        - Generated as a categorical variable
-        - Generated as a conditional categorical variable based on one expression per categorie
+        Adds a new variable to the dataset based on various options.
+
+        Parameters:
+        - name (str): The name of the new variable.
+        - expression (str, optional): A mathematical expression to generate the variable.
+        - distribution (str, optional): The name of the distribution to use for generating the variable.
+        - dist_params (dict, optional): Parameters for the specified distribution.
+        - noise_level (float, optional): The level of noise to add. Default is 0.
+        - categories (list, optional): A list of categories for a categorical variable.
+        - base_probs (list, optional): Base probabilities for each category.
+        - exp_level (float, optional): A level for balancing the influence of base_probs and adjusted probabilities.
+        - categorical_var (str, optional): Name of an existing categorical variable to base the new variable on.
+        - dist_dict (dict, optional): A dictionary mapping categories to distributions for a conditional variable.
+        - exp_dict (dict, optional): A dictionary mapping categories to expressions for a conditional variable.
+        - lvl_measurment (str, optional): The level of measurement for the variable ('numeric' or 'categorical').
+
+        Returns:
+        - DataGenerator: Returns the DataGenerator object for method chaining.
+
+        Note:
+        - The method is highly flexible and can generate variables based on expressions, distributions,
+        or existing categorical variables. The type of variable generated depends on the arguments provided.
         """
 
         if expression:
             data = self.gen_from_exp(expression)
-            self.dataset[name] = self.add_noise(data, noise_level)
+            self.dataset[name] = self.add_numerical_noise(data, noise_level)
 
             metadata = {
                 "type": "expression",
@@ -99,7 +142,7 @@ class DataGenerator:
 
         elif distribution:
             data = self.gen_from_dist(distribution, dist_params)
-            self.dataset[name] = self.add_noise(data, noise_level)
+            self.dataset[name] = self.add_numerical_noise(data, noise_level)
 
             metadata = {
                 "type": "distribution",
@@ -115,7 +158,7 @@ class DataGenerator:
             categorical_var and dist_dict
         ):  # Numeric variable based on distributions for categories
             data = self.gen_numeric_from_cat_dist(categorical_var, dist_dict)
-            self.dataset[name] = self.add_noise(data, noise_level)
+            self.dataset[name] = self.add_numerical_noise(data, noise_level)
 
             metadata = {
                 "type": "numeric_from_cat_dist",
@@ -130,7 +173,7 @@ class DataGenerator:
         elif categorical_var and exp_dict:
             # Numeric from expressions for categroies
             data = self.gen_numeric_from_cat_exp(categorical_var, exp_dict)
-            self.dataset[name] = self.add_noise(data, noise_level)
+            self.dataset[name] = self.add_numerical_noise(data, noise_level)
             input_vars = []
             for expression in list(exp_dict.values()):
                 exp_input_vars = self.extract_var_from_re(expression)
@@ -459,6 +502,16 @@ class DataGenerator:
         filtered_variables = [var for var in variables if var not in math_attributes]
 
         return filtered_variables
+
+    def get_input_vars(self, expressions):
+        input_vars = []
+        for expression in expressions:
+            exp_input_vars = self.extract_var_from_re(expression)
+            for var in exp_input_vars:
+                if var in self.dataset.columns:
+                    input_vars.append(var)
+        unique_input_vars = set(input_vars)
+        return unique_input_vars
 
     def get_target_var_name(self):
         for var_name, var_metadata in self.metadata.items():

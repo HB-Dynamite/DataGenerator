@@ -1,11 +1,12 @@
 # %%
-from DataGen import DataGenerator
 import numpy as np
 from pprint import pprint
+from DataGen import DataGenerator
+from plotter import Plotter
 
 
 # Initialize the Data Generator with 100,000 observations
-ds_generator = DataGenerator(1000, "diabetes2_dataset")
+ds_generator = DataGenerator(100000, "diabetes")
 
 # %%
 # Add Gender variable using categories
@@ -67,8 +68,12 @@ ds_generator.add_bias(
 )
 
 # %%
+ds_generator.remove_var("height")
+ds_generator.remove_var("weight")
+
+# %%
 # Save the dataset as a CSV file
-ds_generator.save_as_csv("diabetes2_dataset.csv")
+ds_generator.save_as_csv()
 
 # Output metadata
 pprint(ds_generator.get_metadata())
@@ -77,4 +82,27 @@ pprint(ds_generator.get_metadata())
 ds_generator.generate_graph()
 
 # %%
-ds_generator.explore_data()
+# ds_generator.explore_data()
+
+
+# %% init Plotter
+# plotter = Plotter("diabetes",is_syn = False) # example for gamCompare datasets
+plotter = Plotter("diabetes", is_syn=True)  # will load data by name
+
+# run models and get shapeplots (Plots will be saved as png)
+# %%
+### EBM ###
+plotter.EBM()
+
+# %%
+### PYGAM ###
+plotter.PYGAM()
+
+# %%
+### IGANN ###
+plotter.IGANN()
+
+# %%
+### LR ###
+plotter.LR()
+# %%

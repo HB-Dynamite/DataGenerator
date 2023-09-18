@@ -58,6 +58,7 @@ class Plotter:
         self.scaler_dict = None
         self.task = None
         self.plot_data = PlotData()
+        self.model_dict = {}
 
         self.load_dataset()
         self.preprocess_data()
@@ -409,6 +410,7 @@ class Plotter:
             )
         ebm.fit(self.X_train, self.y_train)
         self.evaluate_model(ebm)
+        self.model_dict.update({"ebm": ebm})
         ebm_global = ebm.explain_global()
 
         for i, _ in enumerate(ebm_global.data()["names"]):
@@ -506,6 +508,7 @@ class Plotter:
         else:
             LR = LogisticRegression()
         LR.fit(self.X, self.y)
+        self.evaluate_model(LR)
         plot_data = PlotData()
         word_to_coef = dict(zip(LR.feature_names_in_, LR.coef_.squeeze()))
         dict(sorted(word_to_coef.items(), key=lambda item: item[1]))
@@ -538,6 +541,7 @@ class Plotter:
         model_name = "IGANN"
         igann = IGANN(self.task, n_estimators=1000, device="cpu")
         igann.fit(self.X, np.array(self.y))
+        self.evaluate_model(igann)
 
         plot_data = PlotData()
         shape_data = igann.get_shape_functions_as_dict()

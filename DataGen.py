@@ -5,6 +5,7 @@ import os
 import math
 import re  # To parse the expression string
 from typing import List, Dict, Union
+import warnings
 
 import networkx as nx
 import matplotlib.pyplot as plt
@@ -134,7 +135,7 @@ class DataGenerator:
                 "type": "expression",
                 "expression": expression,
                 "noise_level": noise_level,
-                "input_vars": self.extract_var_from_re(expression),
+                "input_vars": self.get_input_vars(expression),
                 "lvl_measurement": "numeric"
                 if lvl_measurment is None
                 else lvl_measurment,
@@ -186,6 +187,7 @@ class DataGenerator:
                 "categorical_var": categorical_var,
                 "exp_map": exp_dict,
                 "noise_level": noise_level,
+                "input_vars": self.get_input_vars(exp_dict.values()),
                 "lvl_measurement": "numeric"
                 if lvl_measurment is None
                 else lvl_measurment,
@@ -205,20 +207,13 @@ class DataGenerator:
                     data, noise_level, categories
                 )
 
-                input_vars = []
-                for expression in list(exp_dict.values()):
-                    exp_input_vars = self.extract_var_from_re(expression)
-                    for var in exp_input_vars:
-                        input_vars.append(var)
-                unique_input_vars = set(input_vars)
-
                 metadata = {
                     "type": "conditional_categorical_from_exp",
                     "categories": categories,
                     "base_probs": base_probs,
                     "exp_dict": exp_dict,
                     "exp_level": exp_level,
-                    "input_vars": unique_input_vars,
+                    "input_vars": self.get_input_vars(exp_dict.values()),
                     "noise_level": noise_level,
                     "lvl_measurement": "categorical"
                     if lvl_measurment is None
@@ -346,9 +341,14 @@ class DataGenerator:
             np.ndarray: The generated categorical data.
         """
 
-        def softmax(x):
-            e_x = np.exp(x - np.max(x))  # Subtract np.max(x) for numerical stability
-            return e_x / e_x.sum(axis=0, keepdims=True)
+        def norm(x):
+            x_min = x.min()
+            if x_min < 0:
+                warnings.warn(
+                    "Expression evaluated to negative probability. Check if this was intended"
+                )
+            x = x - x_min
+            return x / x.sum()
 
         def calculate_probs_from_exp(row, expressions):
             probs = []
@@ -362,7 +362,7 @@ class DataGenerator:
                     result = 0  # Default to zero if there's an error
                 probs.append(result)
             # ensure porbs sum up to 1 and return
-            return softmax(np.array(probs))
+            return norm(np.array(probs))
 
         def combine_base_and_exp_probs(base_probs, exp_probs, exp_level):
             return (
@@ -449,7 +449,11 @@ class DataGenerator:
         self.dataset = self.dataset.drop(name, axis=1)
         return self
 
-    def create_target(self, name, **kwargs):
+    def hide_var(self, name):
+        self.metadata[name].update({"hidden": True})
+        return self
+
+    def add_target(self, name, **kwargs):
         """
         Simple method to create a target variable.
         This methods simply calles the add_var method but prefixes the var name with _target.
@@ -457,7 +461,9 @@ class DataGenerator:
         name: name of target variable str
         **kwargs: kwargs for add var
         """
-        self.add_var("target_" + name, **kwargs)
+        target_name = "target_" + name
+        self.add_var(target_name, **kwargs)
+        self.metadata[target_name].update({"target": True})
 
     def add_bias(self, **kwargs):
         """
@@ -465,12 +471,75 @@ class DataGenerator:
         Simple creates a new var that is prefixed with bias.
         TODO: should ensure that the orignial target is part of the input variables.(complicated check)
         """
-        target_name = self.get_target_var_name()
-        biased_target_name = "biased_" + target_name
+        target_name = self.get_target_names(biased=False)[0]
+        print(target_name)
+        biased_target_name = target_name + "_biased"
         self.add_var(biased_target_name, **kwargs)
+        self.metadata[biased_target_name].update({"biased": True, "target": True})
 
-    def get_dataset(self):
-        return self.dataset
+    def get_dataset(self, mode="biased"):
+        mode_dict = {
+            "full": self.dataset,
+            "biased": self.dataset.loc[
+                :, self.get_not_hidden_vars_names() + self.get_target_names(biased=True)
+            ],
+            "unbiased": self.dataset.loc[
+                :,
+                self.get_not_hidden_vars_names() + self.get_target_names(biased=False),
+            ],
+        }
+        return mode_dict[mode]
+
+    def get_X(self, mode="not_hidden"):
+        mode_dict = {
+            "full": self.dataset.loc[:, self.get_var_names()],
+            "not_hidden": self.dataset.loc[:, self.get_not_hidden_vars_names()],
+        }
+        return mode_dict[mode]
+
+    def get_y(self, mode="biased"):
+        return self.dataset.loc[:, self.get_target_names(biased=(mode == "biased"))]
+
+    def get_hidden_vars_names(self):
+        hidden_vars = []
+        for var in self.metadata.keys():
+            if (
+                "hidden" in self.metadata[var].keys()
+                and self.metadata[var]["hidden"] == True
+            ):
+                hidden_vars.append(var)
+        return hidden_vars
+
+    def get_var_names(self):
+        vars = []
+        for var in self.metadata.keys():
+            var_metadata = self.metadata[var]
+            if "target" not in var_metadata:
+                vars.append(var)
+        return vars
+
+    def get_not_hidden_vars_names(self):
+        not_hidden_vars = []
+        for var in self.get_var_names():
+            var_metadata = self.metadata[var]
+            if (
+                "hidden" in self.metadata[var].keys()
+                and self.metadata[var]["hidden"] == False
+            ) or ("hidden" not in self.metadata[var]):
+                not_hidden_vars.append(var)
+        return not_hidden_vars
+
+    def get_target_names(self, biased=False):
+        targets = []
+        for var, var_metadata in self.metadata.items():
+            if "target" in var_metadata:
+                # If looking for biased targets
+                if biased and var_metadata.get("biased") == True:
+                    targets.append(var)
+                # If looking for unbiased targets
+                elif not biased and not var_metadata.get("biased"):
+                    targets.append(var)
+        return targets
 
     def get_metadata(self):
         return self.metadata
@@ -478,20 +547,12 @@ class DataGenerator:
     def get_name(self):
         return self.name
 
-    def save_as_csv(self, file_name=None):
+    def save_as_csv(self, file_name=None, mode="biased"):
         if file_name is None:
-            file_name = self.name + ".csv"
+            file_name = self.name + "_" + mode + ".csv"
         path = os.path.join("data", file_name)
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        self.dataset.to_csv(path, index=False)
-
-    def save_alt_as_csv(self, file_name=None):
-        if file_name is None:
-            file_name = self.name + "_alt" + ".csv"
-        path = os.path.join("data", file_name)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        alt_dataset = self.get_alt_dataset()
-        alt_dataset.to_csv(path, index=False)
+        self.get_dataset(mode=mode).to_csv(path, index=False)
 
     def extract_var_from_re(self, expression):
         # Extract potential variable names from the expression
@@ -504,20 +565,20 @@ class DataGenerator:
         return filtered_variables
 
     def get_input_vars(self, expressions):
+        # Ensure expressions is a list
+        if isinstance(expressions, str):
+            expressions = [expressions]
+        print(expressions)
         input_vars = []
         for expression in expressions:
             exp_input_vars = self.extract_var_from_re(expression)
             for var in exp_input_vars:
+                print(var)
+                print(self.dataset.columns)
                 if var in self.dataset.columns:
                     input_vars.append(var)
         unique_input_vars = set(input_vars)
         return unique_input_vars
-
-    def get_target_var_name(self):
-        for var_name, var_metadata in self.metadata.items():
-            if var_name.startswith("target_"):
-                return var_name
-        raise Exception("No target variable found in metadata.")
 
     def generate_graph(self):
         G = nx.DiGraph()

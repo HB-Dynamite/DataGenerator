@@ -101,13 +101,16 @@ class Dataset:
             "n_columns": df.shape[1],
         }
         self.categorical_cols = []
-        target_col = [col for col in df.columns if col.startswith("target_")]
-        biased_target_col = [col for col in df.columns if col.startswith("biased_")]
+        target_cols = [col for col in df.columns if col.startswith("target_")]
+        biased_target_col = [col for col in target_cols if col.endswith("_biased")]
+        unbiased_target_col = [
+            col for col in target_cols if col not in biased_target_col
+        ]
 
         feature_cols = [
-            col for col in df.columns if col not in target_col + biased_target_col
+            col for col in df.columns if col not in target_cols + biased_target_col
         ]
-        print(f"target: {target_col}")
+        print(f"target: {target_cols}")
         print(f"biased target: {biased_target_col}")
         print(f"features: {feature_cols}")
 
@@ -122,7 +125,7 @@ class Dataset:
         if self.biased:
             self.y = df.loc[:, biased_target_col]
         else:
-            self.y = df.loc[:, target_col]
+            self.y = df.loc[:, unbiased_target_col]
 
         self.y = pd.DataFrame(self.y)
 
@@ -133,7 +136,7 @@ class Dataset:
         else:
             self.problem = "classification"
             le = LabelEncoder()
-            self.y = le.fit_transform(self.y)
+            self.y = le.fit_transform(self.y.values.ravel())
             print("encoded Labels:", self.y)
 
         self.X = self._preprocess_columns(df)

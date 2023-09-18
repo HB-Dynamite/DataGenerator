@@ -3,10 +3,11 @@ import numpy as np
 from pprint import pprint
 from DataGen import DataGenerator
 from plotter import Plotter
+import gamchanger as gc
 
 
-# Initialize the Data Generator with 100,000 observations
-ds_generator = DataGenerator(100000, "diabetes")
+# Initialize the Data Generator with 10,000 observations
+ds_generator = DataGenerator(10000, "diabetes")
 
 # %%
 # Add Gender variable using categories
@@ -45,12 +46,12 @@ ds_generator.add_var(name="bmi", expression="weight / (height / 100) ** 2")
 
 # %%
 # Create Diabetes target variable
-ds_generator.create_target(
+ds_generator.add_target(
     categories=["yes", "no"],
     name="diabetes",
     base_probs=[0.05, 0.95],
-    exp_dict={"yes": "0.05*bmi+ 0.05*age", "no": "1"},
-    exp_level=0.7,
+    exp_dict={"yes": "0.6*math.exp(bmi-24)+ 0.1*(age-54)", "no": "1"},
+    exp_level=1,
     noise_level=0.1,
 )
 
@@ -60,20 +61,23 @@ ds_generator.add_bias(
     categories=["yes", "no"],
     base_probs=[0.05, 0.95],
     exp_dict={
-        "yes": "0.9*('target_diabetes' == 'yes') + 0.1*(gender == 'male')",
-        "no": "0.9*('target_diabetes' == 'no') - 0.1*('gender' == 'male')",
+        "yes": "0.9*(target_diabetes == 'yes') + 0.3*(gender == 'male')",
+        "no": "1*(target_diabetes == 'no')+ 0.3*(gender == 'female')",
     },
-    exp_level=0.7,
-    noise_level=0.1,
+    exp_level=1,  # no base probs. Soley rely on other vars
+    noise_level=0.05,
 )
 
 # %%
-ds_generator.remove_var("height")
-ds_generator.remove_var("weight")
+ds_generator.hide_var("height")
+ds_generator.hide_var("weight")
 
 # %%
 # Save the dataset as a CSV file
 ds_generator.save_as_csv()
+ds_generator.save_as_csv(mode="unbiased")
+ds_generator.save_as_csv()
+
 
 # Output metadata
 pprint(ds_generator.get_metadata())
@@ -82,7 +86,7 @@ pprint(ds_generator.get_metadata())
 ds_generator.generate_graph()
 
 # %%
-# ds_generator.explore_data()
+ds_generator.explore_data()
 
 
 # %% init Plotter
@@ -106,3 +110,9 @@ plotter.IGANN()
 ### LR ###
 plotter.LR()
 # %%
+# inti gamchanger
+gc.visualize(
+    plotter.model_dict["ebm"],
+    plotter.X_test,
+    plotter.y_test,
+)

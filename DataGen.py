@@ -341,14 +341,20 @@ class DataGenerator:
             np.ndarray: The generated categorical data.
         """
 
-        def norm(x):
+        def norm(x, epsilon=1e-12):
             x_min = x.min()
             if x_min < 0:
                 warnings.warn(
                     "Expression evaluated to negative probability. Check if this was intended"
                 )
             x = x - x_min
-            return x / x.sum()
+            # add epslion do account fro all x.sum() == 0
+            x_normalized = x / (x.sum() + epsilon)
+            # Adjust the values so that their sum is exactly 1
+            diff = 1.0 - x_normalized.sum()
+            adjustment = diff / len(x)
+            x_normalized += adjustment
+            return x_normalized
 
         def calculate_probs_from_exp(row, expressions):
             probs = []
@@ -472,7 +478,6 @@ class DataGenerator:
         TODO: should ensure that the orignial target is part of the input variables.(complicated check)
         """
         target_name = self.get_target_names(biased=False)[0]
-        print(target_name)
         biased_target_name = target_name + "_biased"
         self.add_var(biased_target_name, **kwargs)
         self.metadata[biased_target_name].update({"biased": True, "target": True})
@@ -654,4 +659,13 @@ class DataGenerator:
                 plt.show()
                 plt.close()
 
+        def plt_target():
+            unbiased_targets = self.get_target_names(biased=False)
+            biased_targets = self.get_target_names(biased=True)
+            for biased_target in biased_targets:
+                bias_vars = self.metadata[biased_targets]["input_vars"]
+
+            print(bias_vars)
+
         plt_hists(self.dataset.columns)
+        plt_target()

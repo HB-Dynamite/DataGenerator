@@ -38,9 +38,8 @@ from igann import IGANN
 
 
 class Plotter:
-    def __init__(self, data_set_name, is_syn=False, random_state=1):
-        self.data_set_name = data_set_name
-        self.is_syn = is_syn
+    def __init__(self, dataset=None, dataset_name=None, random_state=1, is_biased=True):
+        self.data_set_name = dataset_name
         self.random_state = random_state
         self.dataset = None
         self.X = None
@@ -60,13 +59,19 @@ class Plotter:
         self.plot_data = PlotData()
         self.model_dict = {}
 
-        self.load_dataset()
+        self.load_dataset(
+            dataset=dataset, dataset_name=dataset_name, is_biased=is_biased
+        )
         self.preprocess_data()
         self.split_data()
         self.create_directories()
 
-    def load_dataset(self):
-        self.dataset = Dataset(self.data_set_name, self.is_syn)
+    def load_dataset(self, dataset=None, dataset_name=None, is_biased=True):
+        if dataset:
+            self.dataset = dataset
+            self.data_set_name = dataset.name
+        else:
+            Dataset(dataset_name, is_biased)
         self.task = self.dataset.problem
         self.X = self.dataset.X
         self.y = self.dataset.y
@@ -471,6 +476,7 @@ class Plotter:
 
         PYGAM.fit(self.X_train, self.y_train)
         self.evaluate_model(PYGAM)
+        self.model_dict.update({"pygam": PYGAM})
 
         plot_data = PlotData()
         for i, term in enumerate(PYGAM.terms):
@@ -509,6 +515,8 @@ class Plotter:
             LR = LogisticRegression()
         LR.fit(self.X, self.y)
         self.evaluate_model(LR)
+        self.model_dict.update({"lr": LR})
+
         plot_data = PlotData()
         word_to_coef = dict(zip(LR.feature_names_in_, LR.coef_.squeeze()))
         dict(sorted(word_to_coef.items(), key=lambda item: item[1]))
@@ -542,6 +550,7 @@ class Plotter:
         igann = IGANN(self.task, n_estimators=1000, device="cpu")
         igann.fit(self.X, np.array(self.y))
         self.evaluate_model(igann)
+        self.model_dict.update({"igann": igann})
 
         plot_data = PlotData()
         shape_data = igann.get_shape_functions_as_dict()

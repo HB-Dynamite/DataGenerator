@@ -3,6 +3,7 @@ import numpy as np
 from pprint import pprint
 from DataGen import DataGenerator
 from plotter import Plotter
+from load_datasets import Dataset
 import gamchanger as gc
 
 
@@ -61,8 +62,8 @@ ds_generator.add_bias(
     categories=["yes", "no"],
     base_probs=[0.05, 0.95],
     exp_dict={
-        "yes": "0.9*(target_diabetes == 'yes') + 0.3*(gender == 'male')",
-        "no": "1*(target_diabetes == 'no')+ 0.3*(gender == 'female')",
+        "yes": "0.5*(target_diabetes == 'yes') + 0.5*(gender == 'male')",
+        "no": "0.5*(target_diabetes == 'no')+ 0.5*(gender == 'female')",
     },
     exp_level=1,  # no base probs. Soley rely on other vars
     noise_level=0.05,
@@ -90,29 +91,64 @@ ds_generator.explore_data()
 
 
 # %% init Plotter
-# plotter = Plotter("diabetes",is_syn = False) # example for gamCompare datasets
-plotter = Plotter("diabetes", is_syn=True)  # will load data by name
+diabetes_biased = Dataset("diabetes_biased", biased=True)
+print(diabetes_biased)
+plotter_biased = Plotter(dataset=diabetes_biased)  # will load data by name
 
 # run models and get shapeplots (Plots will be saved as png)
 # %%
 ### EBM ###
-plotter.EBM()
+plotter_biased.EBM()
 
 # %%
 ### PYGAM ###
-plotter.PYGAM()
+plotter_biased.PYGAM()
 
 # %%
 ### IGANN ###
-plotter.IGANN()
+plotter_biased.IGANN()
 
 # %%
 ### LR ###
-plotter.LR()
+plotter_biased.LR()
+
+
+# %% init Plotter
+# plotter = Plotter("diabetes",is_syn = False) # example for gamCompare datasets
+diabetes_unbiased = Dataset("diabetes_unbiased", biased=False)
+plotter_unbiased = Plotter(dataset=diabetes_unbiased)  # will load data by name
+
+# run models and get shapeplots (Plots will be saved as png)
 # %%
-# inti gamchanger
+### EBM ###
+plotter_unbiased.EBM()
+
+# %%
+### PYGAM ###
+plotter_unbiased.PYGAM()
+
+# %%
+### IGANN ###
+plotter_unbiased.IGANN()
+
+# %%
+### LR ###
+plotter_unbiased.LR()
+
+
+# %%
+# inti gamchanger for biased data
 gc.visualize(
-    plotter.model_dict["ebm"],
-    plotter.X_test,
-    plotter.y_test,
+    plotter_biased.model_dict["ebm"],
+    plotter_biased.X_test,
+    plotter_biased.y_test,
+)
+
+
+# %%
+# inti gamchanger for unbiased data
+gc.visualize(
+    plotter_unbiased.model_dict["ebm"],
+    plotter_unbiased.X_test,
+    plotter_unbiased.y_test,
 )

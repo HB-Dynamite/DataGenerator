@@ -4,13 +4,15 @@ from sklearn.preprocessing import PowerTransformer, StandardScaler, LabelEncoder
 
 
 class Dataset:
-    def __init__(self, name: str, is_syn=False, biased=False):
+    def __init__(
+        self,
+        name: str,
+        biased: bool,
+    ):
+        self.biased = biased
+        """bool to decide for the correct target name"""
         self.name = name
         """ name of the dataset"""
-        self.is_syn = is_syn
-        """ boolean to handle synthetic datasets"""
-        self.biased = biased
-        """ bool to decide for biased or unbiased version"""
         self.problem = None
         """ classification or regression """
         self.X = None
@@ -94,7 +96,6 @@ class Dataset:
         return df
 
     def load_data(self):
-        # 22
         df = pd.read_csv("data/" + self.name + ".csv", sep=",")
         self.basic_dataset_metadata = {
             "n_samples": df.shape[0],
@@ -115,8 +116,10 @@ class Dataset:
         print(f"features: {feature_cols}")
 
         for col in feature_cols:
+            # this is not safe, but works so far....
             if df[col].nunique() < 10:
                 self.categorical_cols.append(col)
+        # i keep this print to avoid not noticing false categorical vars
         print(f"cat_cols:{self.categorical_cols}")
         self.numerical_cols = [
             col for col in feature_cols if col not in self.categorical_cols

@@ -27,6 +27,7 @@ class DataGenerator:
         self.n_observations = n_observations
         self.name = name
         self.dataset = pd.DataFrame()
+        self.missing_dataset = pd.DataFrame()
         self.metadata = {}
 
     def add_numerical_noise(self, data, noise_level):
@@ -441,7 +442,7 @@ class DataGenerator:
             # get subset of dataframe this is of categorie
             mask = self.dataset[categorical_var] == cat
             subset_size = mask.sum()
-            # get expression for cat
+            # get expression for categorical
             expression = expression_map[cat]
             if expression is None:
                 raise ValueError(f"No expression found for the catgorie {cat}!")
@@ -492,6 +493,7 @@ class DataGenerator:
                 :,
                 self.get_not_hidden_vars_names() + self.get_target_names(biased=False),
             ],
+            "missing": self.missing_dataset,
         }
         return mode_dict[mode]
 
@@ -552,12 +554,12 @@ class DataGenerator:
     def get_name(self):
         return self.name
 
-    def save_as_csv(self, file_name=None, mode="biased"):
+    def save_as_csv(self, file_name=None, dataset_mode="biased"):
         if file_name is None:
-            file_name = self.name + "_" + mode + ".csv"
+            file_name = self.name + "_" + dataset_mode + ".csv"
         path = os.path.join("data", file_name)
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        self.get_dataset(mode=mode).to_csv(path, index=False)
+        self.get_dataset(mode=dataset_mode).to_csv(path, index=False)
 
     def extract_var_from_re(self, expression):
         # Extract potential variable names from the expression
@@ -641,14 +643,20 @@ class DataGenerator:
         )
         plt.show()
 
-    def explore_data(self):
+    def get_reduced_dataset(self, f=0.1, n=None, random_state=42):
+        """func to get random data subset"""
+        return self.dataset.sample(n, random_state=random_state)
+
+    def explore_data(self, dataset_mode="full", vars=None):
         """
         This function allows a quick peek into the generated data.
         """
 
+        dataset = self.get_dataset(mode=dataset_mode)
+
         def plt_hists(vars):
             for var in vars:
-                data = self.dataset[var]
+                data = dataset[var]
                 plt.hist(data, bins=30, color="skyblue", edgecolor="black", alpha=0.7)
 
                 plt.title(f"Histogram of {var}")
@@ -663,9 +671,133 @@ class DataGenerator:
             unbiased_targets = self.get_target_names(biased=False)
             biased_targets = self.get_target_names(biased=True)
             for biased_target in biased_targets:
-                bias_vars = self.metadata[biased_targets]["input_vars"]
+                bias_vars = self.metadata[biased_target]["input_vars"]
 
             print(bias_vars)
 
-        plt_hists(self.dataset.columns)
-        plt_target()
+        if vars is not None:
+            plt_hists(vars)
+        else:
+            plt_hists(dataset.columns)
+            plt_target()
+
+    def add_missing_complety_at_random(self, name, missing_rate):
+        self.create_missing_dataset()
+        if name not in self.dataset.columns:
+            raise ValueError(f"Variable with the name {name} not fount in dataset")
+        if not 0 <= missing_rate <= 1:
+            raise ValueError("missing_rate must be between 0 and 1.")
+
+        # Determine which values will be missing
+        is_missing = np.random.rand(self.n_observations) < missing_rate
+
+        # Assign NaN to the selected missing values
+        self.missing_dataset.loc[is_missing, name] = np.nan
+
+    def add_missing_not_at_random(self, name, desired_missing_rate, expression):
+        self.create_missing_dataset()
+        if name not in self.dataset.columns:
+            raise ValueError(f"Variable {name} not found in dataset.")
+
+        if not 0 <= desired_missing_rate <= 1:
+            raise ValueError("desired_missing_rate must be between 0 and 1.")
+
+        # Calculate probabilities of being missing for each row
+        raw_probs_missing = self.dataset[name].apply(
+            lambda x: eval(expression, {"math": math, "x": x})
+        )
+
+        # plt.scatter(self.dataset[name], raw_probs_missing)
+        # plt.show()
+        probs_missing = raw_probs_missing
+
+        # normalize the probs
+        min_prob = np.min(probs_missing)
+        max_prob = np.max(probs_missing)
+        range_prob = max_prob - min_prob
+
+        if range_prob > 0:
+            probs_missing = (probs_missing - min_prob) / range_prob
+        else:
+            # Handle the case where all values are the same (avoid division by zero)
+            probs_missing = np.zeros_like(probs_missing)
+            raise Warning(
+                "All porbalilites for missings where the same check your expression"
+            )
+
+        # plt.scatter(self.dataset[name], probs_missing, c="red")
+
+        # plt.show()
+
+        # Determine which values to set as missing
+        random_values = np.random.rand(len(self.dataset))
+
+        adjustment = 0
+        tolerance = 0.005
+        for _ in range(100):
+            is_missing = random_values < (probs_missing + adjustment)
+            current_missing_rate = np.mean(is_missing)
+            print(current_missing_rate)
+            delta = current_missing_rate - desired_missing_rate
+            if abs(delta) < tolerance:
+                break
+            # plt.scatter(self.dataset[name], probs_missing + adjustment, c="red")
+            # plt.show()
+            adjustment -= 0.5 * delta
+
+        # Apply missing values to the dataset
+        self.missing_dataset.loc[is_missing, name] = np.nan
+
+    def add_missing_at_random(self, name, desired_missing_rate, expression):
+        self.create_missing_dataset()
+        if name not in self.dataset.columns:
+            raise ValueError(f"Variable {name} not found in dataset.")
+
+        if not 0 <= desired_missing_rate <= 1:
+            raise ValueError("desired_missing_rate must be between 0 and 1.")
+
+        def eval_expression(row):
+            try:
+                return eval(expression, {"math": math}, row)
+            except Exception as e:
+                print(f"Error evaluating expression '{expression}' for row {row}: {e}")
+                return 0  # Default to zero if there's an error
+
+        # Calculate probabilities of being missing for each row
+        raw_probs_missing = self.dataset.apply(eval_expression, axis=1).to_numpy()
+
+        print(raw_probs_missing)
+        # Calculate probabilities of being missing for each row based on the expression
+
+        # Normalize the probabilities
+        probs_missing = raw_probs_missing.copy()
+        min_prob = np.min(probs_missing)
+        max_prob = np.max(probs_missing)
+        range_prob = max_prob - min_prob
+
+        if range_prob > 0:
+            probs_missing = (probs_missing - min_prob) / range_prob
+        else:
+            probs_missing = np.zeros_like(probs_missing)
+            warnings.warn(
+                "All probabilities for missing were the same. Check your expression."
+            )
+
+        # Determine which values to set as missing
+        random_values = np.random.rand(len(self.dataset))
+        adjustment = 0.0
+        tolerance = 0.005
+        for _ in range(100):  # Limit iterations to avoid infinite loop
+            is_missing = random_values < (probs_missing + adjustment)
+            current_missing_rate = np.mean(is_missing)
+            delta = current_missing_rate - desired_missing_rate
+            if abs(delta) < tolerance:
+                break
+            adjustment -= 0.3 * delta  # Adjust the threshold
+
+        # Apply missing values to the dataset
+        self.missing_dataset.loc[is_missing, name] = np.nan
+
+    def create_missing_dataset(self):
+        if self.missing_dataset.empty:
+            self.missing_dataset = self.dataset.copy(deep=True)

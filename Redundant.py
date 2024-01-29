@@ -1,7 +1,6 @@
 # %%
 import numpy as np
 from pprint import pprint
-import os
 from DataGen import DataGenerator
 from plotter import Plotter
 from load_datasets import Dataset
@@ -51,20 +50,14 @@ ds_generator.add_var(name="bmi", expression="weight / (height / 100) ** 2")
 ds_generator.add_target(
     categories=["yes", "no"],
     name="diabetes",
-    base_probs=[0.05, 0.95],  # TODO: find better way to integrate base probs are
-    exp_dict={
-        "yes": "0.6*math.exp(bmi-24) + 0.1*(age-54)",
-        "no": "1",
-    },  # TODO: find better way to calc probs from expressions
-    exp_level=1,  # no influence of base probs
+    base_probs=[0.05, 0.95],
+    exp_dict={"yes": "0.6*math.exp(bmi-24)+ 0.1*(age-54)", "no": "1"},
+    exp_level=1,
     noise_level=0.1,
 )
 
 # %%
 # Add a bias to increase the probability of diabetes for males
-# TODO: it should be more cleare how the target variable gets biased.
-# 1. Target should always beeing the main porb giver for the target (consider a factor)
-# 2. It may be cool if the bias is more observations more that where at the
 ds_generator.add_bias(
     categories=["yes", "no"],
     base_probs=[0.05, 0.95],
@@ -77,25 +70,16 @@ ds_generator.add_bias(
 )
 
 # %%
-# try missing functions
-ds_generator.explore_data(vars=["age"])
-ds_generator.add_missing_at_random("age", 0.1, "max(0,bmi-20)")
-ds_generator.explore_data(vars=["age"], dataset_mode="missing")
-
-# ds_generator.add_missing_complety_at_random("age", 0.3)
-
-
-# %%
 ds_generator.hide_var("height")
 ds_generator.hide_var("weight")
 
 # %%
 # Save the dataset as a CSV file
 ds_generator.save_as_csv()
-ds_generator.save_as_csv(dataset_mode="unbiased")
-ds_generator.save_as_csv(dataset_mode="missing")
+ds_generator.save_as_csv(mode="unbiased")
+ds_generator.save_as_csv()
 
-# %%
+
 # Output metadata
 pprint(ds_generator.get_metadata())
 
@@ -168,15 +152,3 @@ gc.visualize(
     plotter_unbiased.X_test,
     plotter_unbiased.y_test,
 )
-
-
-# %%
-# inti gamchanger for model from biased data on unbiased data
-gc.visualize(
-    plotter_biased.model_dict["ebm"],
-    plotter_unbiased.X_test,
-    plotter_unbiased.y_test,
-)
-
-# %%
-print(os.getcwd())

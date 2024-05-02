@@ -12,6 +12,22 @@ import matplotlib.pyplot as plt
 
 
 class DataGenerator:
+
+    distributions = {
+        # continuous 
+        "uniform": (np.random.uniform, {"low": 0, "high": 1}),
+        "normal": (np.random.normal, {"loc": 0, "scale": 1}),
+        "exponential": (np.random.exponential, {"scale": 1}),
+        "gamma": (np.random.gamma, {"shape": 5, "scale": 1}),
+        "lognormal": (np.random.lognormal, {"mean": 0, "sigma": 1}),
+        "weibull": (np.random.weibull, {"a": 4}),
+        "beta": (np.random.beta, {"a": 4, "b": 4}),
+        "chisquare": (np.random.chisquare, {"df":10}),
+        # discrete
+        "binomial": (np.random.binomial, {"n": 100, "p": .5}),
+        "poisson": (np.random.poisson, {"lam": 1.0}),
+    }
+
     def __init__(self, n_observations, name):
         """
         Parameters:
@@ -49,7 +65,7 @@ class DataGenerator:
         """
         # not sure if this is the best method to fit the scale of noise to data values.
         # Idea here is to add use mean so that data of small magniute get small noise and vise versa.
-        sd = np.mean(data) * noise_level
+        sd = np.std(data) * noise_level
         noise = np.random.normal(0, sd, size=len(data))
         return data + noise
 
@@ -258,17 +274,12 @@ class DataGenerator:
         """
         size = self.n_observations if size is None else size
 
-        distributions = {
-            "uniform": (np.random.uniform, {"low": 0, "high": 1}),
-            "normal": (np.random.normal, {"loc": 0, "scale": 1}),
-            # add more distributions
-        }
-
-        if distribution not in distributions:
-            raise ValueError(f"Unsupported distribution: {distribution}.")
-
-        dist_func, params = distributions[distribution]
-        params.update(dist_params or {})
+        if distribution not in __class__.distributions:
+            raise ValueError(f"Unsupported distribution: {distribution}. Have a look at {__class__}.distributions to see available distributions.")
+        
+        dist_func, params = __class__.distributions[distribution]
+        if dist_params:
+            params.update(dist_params)
         pprint(params)
         data = dist_func(size=size, **params)
 
@@ -672,8 +683,6 @@ class DataGenerator:
             biased_targets = self.get_target_names(biased=True)
             for biased_target in biased_targets:
                 bias_vars = self.metadata[biased_target]["input_vars"]
-
-            print(bias_vars)
 
         if vars is not None:
             plt_hists(vars)

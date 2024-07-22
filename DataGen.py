@@ -27,7 +27,7 @@ class DataGenerator:
         self.n_observations = n_observations
         self.name = name
         self.dataset = pd.DataFrame()
-        self.missing_dataset = pd.DataFrame()
+        self.missing_indices = {}
         self.metadata = {}
 
     def add_numerical_noise(self, data, noise_level):
@@ -137,9 +137,9 @@ class DataGenerator:
                 "expression": expression,
                 "noise_level": noise_level,
                 "input_vars": self.get_input_vars(expression),
-                "lvl_measurement": "numeric"
-                if lvl_measurment is None
-                else lvl_measurment,
+                "lvl_measurement": (
+                    "numeric" if lvl_measurment is None else lvl_measurment
+                ),
             }
 
         elif distribution:
@@ -151,9 +151,9 @@ class DataGenerator:
                 "distribution": distribution,
                 "dist_params": dist_params,
                 "noise_level": noise_level,
-                "lvl_measurement": "numeric"
-                if lvl_measurment is None
-                else lvl_measurment,
+                "lvl_measurement": (
+                    "numeric" if lvl_measurment is None else lvl_measurment
+                ),
             }
 
         elif (
@@ -167,9 +167,9 @@ class DataGenerator:
                 "categorical_var": categorical_var,
                 "dist_map": dist_dict,
                 "noise_level": noise_level,
-                "lvl_measurement": "numeric"
-                if lvl_measurment is None
-                else lvl_measurment,
+                "lvl_measurement": (
+                    "numeric" if lvl_measurment is None else lvl_measurment
+                ),
                 "input_vars": [categorical_var],
             }
         elif categorical_var and exp_dict:
@@ -189,9 +189,9 @@ class DataGenerator:
                 "exp_map": exp_dict,
                 "noise_level": noise_level,
                 "input_vars": self.get_input_vars(exp_dict.values()),
-                "lvl_measurement": "numeric"
-                if lvl_measurment is None
-                else lvl_measurment,
+                "lvl_measurement": (
+                    "numeric" if lvl_measurment is None else lvl_measurment
+                ),
             }
 
         elif categories:
@@ -216,9 +216,9 @@ class DataGenerator:
                     "exp_level": exp_level,
                     "input_vars": self.get_input_vars(exp_dict.values()),
                     "noise_level": noise_level,
-                    "lvl_measurement": "categorical"
-                    if lvl_measurment is None
-                    else lvl_measurment,
+                    "lvl_measurement": (
+                        "categorical" if lvl_measurment is None else lvl_measurment
+                    ),
                 }
 
             else:  # Simple categorical variable
@@ -231,9 +231,9 @@ class DataGenerator:
                     "categories": categories,
                     "base_probs": base_probs,
                     "noise_level": noise_level,
-                    "lvl_measurement": "categorical"
-                    if lvl_measurment is None
-                    else lvl_measurment,
+                    "lvl_measurement": (
+                        "categorical" if lvl_measurment is None else lvl_measurment
+                    ),
                 }
 
         else:
@@ -261,7 +261,10 @@ class DataGenerator:
         distributions = {
             "uniform": (np.random.uniform, {"low": 0, "high": 1}),
             "normal": (np.random.normal, {"loc": 0, "scale": 1}),
-            # add more distributions
+            "binomial": (np.random.binomial, {"n": 1, "p": 0.5}),
+            "poisson": (np.random.poisson, {"lam": 1}),
+            "exponential": (np.random.exponential, {"scale": 1}),
+            "beta": (np.random.beta, {"a": 0.5, "b": 0.5}),
         }
 
         if distribution not in distributions:
@@ -299,7 +302,7 @@ class DataGenerator:
 
         return data
 
-    def gen_from_exp(self, expression):
+    def gen_from_exp(self, expression, df=None):
         """
         Generate data based on a provided mathematical expression.
 
@@ -311,6 +314,8 @@ class DataGenerator:
         - np.array: Data generated from the expression.
         """
 
+        dataset = df if df is not None else self.dataset
+
         def eval_expression(row):
             try:
                 return eval(expression, {"math": math}, row)
@@ -318,7 +323,7 @@ class DataGenerator:
                 print(f"Error evaluating expression '{expression}' for row {row}: {e}")
                 return 0  # Default to zero if there's an error
 
-        data = self.dataset.apply(eval_expression, axis=1).to_numpy()
+        data = dataset.apply(eval_expression, axis=1).to_numpy()
 
         return data
 
@@ -436,19 +441,29 @@ class DataGenerator:
         return data
 
     def gen_numeric_from_cat_exp(self, categorical_var, expression_map):
+        def eval_expression(row, expression):
+            try:
+                return eval(expression, {"math": math}, row)
+            except Exception as e:
+                print(f"Error evaluating expression '{expression}' for row {row}: {e}")
+                return 0  # Default to zero if there's an error
+
         unique_catgories = self.dataset[categorical_var].unique()
         data = np.zeros(self.n_observations)
         for cat in unique_catgories:
             # get subset of dataframe this is of categorie
             mask = self.dataset[categorical_var] == cat
-            subset_size = mask.sum()
+            subset = self.dataset[mask]
             # get expression for categorical
             expression = expression_map[cat]
             if expression is None:
                 raise ValueError(f"No expression found for the catgorie {cat}!")
             else:
                 # gerate data from respective expression
-                generated_data = self.gen_from_exp(expression)
+                generated_data = subset.apply(
+                    eval_expression, axis=1, expression=expression
+                ).to_numpy()
+
             data[mask] = generated_data
         return data
 
@@ -493,8 +508,15 @@ class DataGenerator:
                 :,
                 self.get_not_hidden_vars_names() + self.get_target_names(biased=False),
             ],
-            "missing": self.missing_dataset,
+            "missing": self.get_missing_dataset().loc[
+                :, self.get_not_hidden_vars_names() + self.get_target_names(biased=True)
+            ],
         }
+        print(f"Selected mode: {mode}")
+        if mode in mode_dict:
+            print(f"Columns in dataset for mode '{mode}': {mode_dict[mode].columns}")
+        else:
+            print(f"Mode '{mode}' not found in mode_dict.")
         return mode_dict[mode]
 
     def get_X(self, mode="not_hidden"):
@@ -651,7 +673,7 @@ class DataGenerator:
         """
         This function allows a quick peek into the generated data.
         """
-
+        print(dataset_mode)
         dataset = self.get_dataset(mode=dataset_mode)
 
         def plt_hists(vars):
@@ -694,65 +716,58 @@ class DataGenerator:
         # Assign NaN to the selected missing values
         self.missing_dataset.loc[is_missing, name] = np.nan
 
-    def add_missing_not_at_random(self, name, desired_missing_rate, expression):
-        self.create_missing_dataset()
+    def add_missing_complety_at_random(self, name, missing_rate):
         if name not in self.dataset.columns:
             raise ValueError(f"Variable {name} not found in dataset.")
+        if not 0 <= missing_rate <= 1:
+            raise ValueError("missing_rate must be between 0 and 1.")
+        is_missing = np.random.rand(self.n_observations) < missing_rate
+        self.missing_indices[name] = is_missing
 
+    def add_missing_not_at_random(self, name, desired_missing_rate, expression):
+        if name not in self.dataset.columns:
+            raise ValueError(f"Variable {name} not found in dataset.")
         if not 0 <= desired_missing_rate <= 1:
             raise ValueError("desired_missing_rate must be between 0 and 1.")
 
         # Calculate probabilities of being missing for each row
-        raw_probs_missing = self.dataset[name].apply(
-            lambda x: eval(expression, {"math": math, "x": x})
+        raw_probs_missing = (
+            self.dataset[name]
+            .apply(lambda x: eval(expression, {"math": math, "x": x}))
+            .to_numpy()
         )
 
-        # plt.scatter(self.dataset[name], raw_probs_missing)
-        # plt.show()
-        probs_missing = raw_probs_missing
-
-        # normalize the probs
-        min_prob = np.min(probs_missing)
-        max_prob = np.max(probs_missing)
+        # Normalize the probabilities
+        min_prob = np.min(raw_probs_missing)
+        max_prob = np.max(raw_probs_missing)
         range_prob = max_prob - min_prob
 
         if range_prob > 0:
-            probs_missing = (probs_missing - min_prob) / range_prob
+            probs_missing = (raw_probs_missing - min_prob) / range_prob
         else:
-            # Handle the case where all values are the same (avoid division by zero)
-            probs_missing = np.zeros_like(probs_missing)
-            raise Warning(
-                "All porbalilites for missings where the same check your expression"
+            probs_missing = np.zeros_like(raw_probs_missing)
+            warnings.warn(
+                "All probabilities for missing were the same. Check your expression."
             )
 
-        # plt.scatter(self.dataset[name], probs_missing, c="red")
-
-        # plt.show()
-
         # Determine which values to set as missing
-        random_values = np.random.rand(len(self.dataset))
-
-        adjustment = 0
+        random_values = np.random.rand(self.n_observations)
+        adjustment = 0.0
         tolerance = 0.005
-        for _ in range(100):
+        for _ in range(100):  # Limit iterations to avoid infinite loop
             is_missing = random_values < (probs_missing + adjustment)
             current_missing_rate = np.mean(is_missing)
-            print(current_missing_rate)
             delta = current_missing_rate - desired_missing_rate
             if abs(delta) < tolerance:
                 break
-            # plt.scatter(self.dataset[name], probs_missing + adjustment, c="red")
-            # plt.show()
-            adjustment -= 0.5 * delta
+            adjustment -= 0.3 * delta  # Adjust the threshold
 
-        # Apply missing values to the dataset
-        self.missing_dataset.loc[is_missing, name] = np.nan
+        # Store the boolean array of missing values
+        self.missing_indices[name] = is_missing
 
     def add_missing_at_random(self, name, desired_missing_rate, expression):
-        self.create_missing_dataset()
         if name not in self.dataset.columns:
             raise ValueError(f"Variable {name} not found in dataset.")
-
         if not 0 <= desired_missing_rate <= 1:
             raise ValueError("desired_missing_rate must be between 0 and 1.")
 
@@ -766,25 +781,21 @@ class DataGenerator:
         # Calculate probabilities of being missing for each row
         raw_probs_missing = self.dataset.apply(eval_expression, axis=1).to_numpy()
 
-        print(raw_probs_missing)
-        # Calculate probabilities of being missing for each row based on the expression
-
         # Normalize the probabilities
-        probs_missing = raw_probs_missing.copy()
-        min_prob = np.min(probs_missing)
-        max_prob = np.max(probs_missing)
+        min_prob = np.min(raw_probs_missing)
+        max_prob = np.max(raw_probs_missing)
         range_prob = max_prob - min_prob
 
         if range_prob > 0:
-            probs_missing = (probs_missing - min_prob) / range_prob
+            probs_missing = (raw_probs_missing - min_prob) / range_prob
         else:
-            probs_missing = np.zeros_like(probs_missing)
+            probs_missing = np.zeros_like(raw_probs_missing)
             warnings.warn(
                 "All probabilities for missing were the same. Check your expression."
             )
 
         # Determine which values to set as missing
-        random_values = np.random.rand(len(self.dataset))
+        random_values = np.random.rand(self.n_observations)
         adjustment = 0.0
         tolerance = 0.005
         for _ in range(100):  # Limit iterations to avoid infinite loop
@@ -795,9 +806,12 @@ class DataGenerator:
                 break
             adjustment -= 0.3 * delta  # Adjust the threshold
 
-        # Apply missing values to the dataset
-        self.missing_dataset.loc[is_missing, name] = np.nan
+        # Store the boolean array of missing values
+        self.missing_indices[name] = is_missing
 
-    def create_missing_dataset(self):
-        if self.missing_dataset.empty:
-            self.missing_dataset = self.dataset.copy(deep=True)
+    def get_missing_dataset(self):
+        # Create a copy of the dataset and apply missing indices
+        missing_dataset = self.dataset.copy(deep=True)
+        for name, is_missing in self.missing_indices.items():
+            missing_dataset.loc[is_missing, name] = np.nan
+        return missing_dataset
